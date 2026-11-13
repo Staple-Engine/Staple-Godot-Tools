@@ -2,14 +2,14 @@
 extends EditorPlugin
 
 var entity_counter = 0
+var exported_materials = PackedStringArray()
 
 func _enter_tree() -> void:
-	
-	add_tool_menu_item("Staple Engine/Export selected files", Callable(self, "export"))
+	add_tool_menu_item("Staple Engine: Export selected files", Callable(self, "export"))
 	
 func _exit_tree() -> void:
 	
-	remove_tool_menu_item("Staple Engine/Export selected files")
+	remove_tool_menu_item("Staple Engine: Export selected files")
 
 func export() -> void:
 	
@@ -47,7 +47,82 @@ func get_class_properties(node: Node) -> Array:
 		out_value.append(property)
 	
 	return out_value
+
+func normalize_resource_path(path: String) -> String:
+	if path.begins_with("res://"):
+		path = path.substr("res://".length())
+	if path.begins_with("user://"):
+		path = path.substr("user://".length())
+		
+	var splitterIndex = path.find("::")
 	
+	if splitterIndex >= 0:
+		path = path.substr(0, splitterIndex)
+	
+	return path
+
+func normalize_material_extension(path: String) -> String:
+	return normalize_resource_path(path).replace(".tres", ".material")
+
+func encode_color(color: Color) -> String:
+	return "#%s" % [color.to_html().to_upper()]
+
+func export_material(material: BaseMaterial3D) -> String:
+	var material_name = normalize_material_extension(material.resource_path)
+
+	if exported_materials.find(material_name) >= 0:
+		return material_name
+		
+	var culling_mode = "Back"
+	var albedo_texture = "WHITE"
+	
+	match material.cull_mode:
+		BaseMaterial3D.CULL_FRONT:
+			culling_mode = "Front"
+		BaseMaterial3D.CULL_DISABLED:
+			culling_mode = "None"
+	
+	if material.albedo_texture != null:
+		albedo_texture = normalize_resource_path(material.albedo_texture.resource_path)
+	
+	var material_data = {
+		"shader": "1ca9a72c-161e-44db-ad76-bf0ae432f78b",
+		"cullingMode": culling_mode,
+		"parameters": {
+			"diffuseColor": {
+				"type": "Color",
+				"colorValue": {
+					"r": clamp(material.albedo_color.r * 255, 0, 255),
+					"g": clamp(material.albedo_color.g * 255, 0, 255),
+					"b": clamp(material.albedo_color.b * 255, 0, 255),
+					"a": clamp(material.albedo_color.a * 255, 0, 255),
+				}
+			},
+			"diffuseTexture": {
+				"type": "Texture",
+				"textureValue": albedo_texture,
+			},
+			"alphaThreshold": {
+				"type": "Float",
+				"floatValue": material.alpha_scissor_threshold,
+			}
+		}
+	}
+	
+	var data = JSON.stringify(material_data, "\t", false)
+	
+	var out_file = FileAccess.open(material_name, FileAccess.WRITE)
+	
+	if out_file:
+		out_file.store_string(data)
+		out_file.close()
+		
+		print("Saved %s!" % [material_name])
+		
+		exported_materials.append(material_name)
+	
+	return material_name
+
 func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 	
 	var parent_id = 0
@@ -131,6 +206,132 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 				"cameraType": projection,
 				"orthographicSize": camera.size,
 				"fov": camera.fov
+			}
+		"CharacterBody3D":
+			var character: CharacterBody3D = node
+			
+			var gravity_factor = 1.0
+			
+			match character.motion_mode:
+				CharacterBody3D.MOTION_MODE_GROUNDED:
+					gravity_factor = 1.0
+				CharacterBody3D.MOTION_MODE_FLOATING:
+					gravity_factor = 0.0
+			
+			component_type = "Staple.Character3D"
+
+			component_data = {
+				"gravityFactor": gravity_factor,
+				"maxSlopeAngle": character.floor_max_angle,
+				
+				"upDirection": {
+					"x": character.up_direction.x,
+					"y": character.up_direction.y,
+					"z": character.up_direction.z,
+				},
+			}
+		"DirectionalLight3D":
+			var light: DirectionalLight3D = node
+			
+			component_type = "Staple.Light"
+
+			component_data = {
+				"type": "Directional",
+				"color": encode_color(light.light_color.to_html()),
+				"intensity": light.light_energy
+			}
+		"MeshInstance3D":
+			var mesh_instance: MeshInstance3D = node
+			
+			component_type = "Staple.MeshRenderer"
+			
+			var surface_count = 0
+			var materials = []
+			var mesh_name = null
+			
+			if mesh_instance.mesh != null:
+				mesh_name = normalize_resource_path(mesh_instance.mesh.resource_path)
+				surface_count = mesh_instance.mesh.get_surface_count()
+			
+			if surface_count > 0:
+				for i in surface_count:
+					var surface_arrays = mesh_instance.mesh.surface_get_arrays(i)
+					
+					if surface_arrays.size() >= ArrayMesh.ARRAY_BONES and surface_arrays[ArrayMesh.ARRAY_BONES] != null:
+						component_type = "Staple.SkinnedMeshRenderer"
+					
+					var material: BaseMaterial3D = mesh_instance.mesh.surface_get_material(i)
+					
+					if material == null:
+						materials.append("")
+					else:
+						var material_path = export_material(material)
+						
+						materials.append(normalize_material_extension(material_path))
+			
+			component_data = {
+
+				"mesh": mesh_name,
+				"materials": materials,
+			}
+			
+		"OmniLight3D":
+			var light: OmniLight3D = node
+
+			component_type = "Staple.Light"
+			
+			component_data = {
+				"type": "Point",
+				"color": encode_color(light.light_color.to_html()),
+				"intensity": light.light_energy,
+				"range": light.omni_range
+			}
+		"RigidBody3D":
+			var rigid_body: RigidBody3D = node
+			
+			var motion_type = "Dynamic"
+			
+			if rigid_body.freeze:
+				match rigid_body.freeze_mode:
+					RigidBody3D.FREEZE_MODE_STATIC:
+						motion_type = "Static"
+					RigidBody3D.FREEZE_MODE_KINEMATIC:
+						motion_type = "Kinematic"
+			
+			component_type = "Staple.RigidBody3D"
+			
+			component_data = {
+				"motionType": motion_type,
+				"freezeRotationX": rigid_body.axis_lock_angular_x or rigid_body.lock_rotation,
+				"freezeRotationY": rigid_body.axis_lock_angular_y or rigid_body.lock_rotation,
+				"freezeRotationZ": rigid_body.axis_lock_angular_z or rigid_body.lock_rotation,
+				"is2DPlane": rigid_body.axis_lock_linear_z,
+				"gravityFactor": rigid_body.gravity_scale,
+				"mass": rigid_body.mass,
+			}
+		"StaticBody3D":
+			var static_body: StaticBody3D = node
+			
+			component_type = "Staple.RigidBody3D"
+			
+			component_data = {
+				"motionType": "Static",
+				"freezeRotationX": static_body.axis_lock_angular_x or static_body.lock_rotation,
+				"freezeRotationY": static_body.axis_lock_angular_y or static_body.lock_rotation,
+				"freezeRotationZ": static_body.axis_lock_angular_z or static_body.lock_rotation,
+				"is2DPlane": static_body.axis_lock_linear_z,
+				"mass": static_body.mass,
+			}
+		"SpotLight3D":
+			var light: SpotLight3D = node
+
+			component_type = "Staple.Light"
+			
+			component_data = {
+				"type": "Spot",
+				"color": encode_color(light.light_color.to_html()),
+				"intensity": light.light_energy,
+				"range": light.spot_range
 			}
 		"Node2D":
 			component_type = ""
@@ -220,14 +421,17 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 						Variant.Type.TYPE_COLOR:
 							var v: Color = node.get(property.name)
 							
-							component_data[property.name] = v.to_html()
+							component_data[property.name] = encode_color(v.to_html())
 						
 			
 	
-	components = {
-		"type": component_type,
-		"data": component_data
-	}
+	if component_type.length() != 0:
+		components.append(
+			{
+				"type": component_type,
+				"data": component_data,
+			}
+		)
 	
 	entity_data.components = components
 	
@@ -256,6 +460,9 @@ func export_selected(path: String) -> void:
 		EditorInterface.popup_dialog_centered(dialog);
 		
 		return
+	
+	if exported_materials == null:
+		exported_materials = PackedStringArray()
 		
 	var failures = PackedStringArray()
 	
