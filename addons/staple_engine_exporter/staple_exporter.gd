@@ -126,6 +126,12 @@ func export_material(material: BaseMaterial3D) -> String:
 	
 	return material_name
 
+func left_handed_position(position: Vector3) -> Vector3:
+	return Vector3(position.x, position.y, -position.z)
+
+func left_handed_rotation_angles(rotation: Vector3)-> Vector3:
+	return Vector3(-rotation.x, -rotation.y, rotation.z)
+
 func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 	
 	var parent_id = 0
@@ -150,8 +156,9 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 	if node is Node3D:
 		var n: Node3D = node
 		visible = n.is_visible()
-		position = n.position
-		rotation = n.rotation_degrees
+		var transform = n.transform
+		position = left_handed_position(n.position)
+		rotation = left_handed_rotation_angles(n.rotation_degrees)
 		scale = n.scale
 	
 	var entity_data = {
@@ -163,7 +170,7 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 			"position": {
 				"x": position.x,
 				"y": position.y,
-				"z": position.z
+				"z": position.z,
 			},
 			"rotation": {
 				"x": rotation.x,
