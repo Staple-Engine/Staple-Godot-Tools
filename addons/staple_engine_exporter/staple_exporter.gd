@@ -58,11 +58,14 @@ func normalize_resource_path(path: String) -> String:
 	
 	if splitterIndex >= 0:
 		path = path.substr(0, splitterIndex)
-	
+		
 	return path
 
 func normalize_material_extension(path: String) -> String:
 	return normalize_resource_path(path).replace(".tres", ".material")
+
+func match_assets_path(path: String) -> String:
+	return "Assets/%s" % [path]
 
 func encode_color(color: Color) -> String:
 	return "#%s" % [color.to_html().to_upper()]
@@ -83,7 +86,7 @@ func export_material(material: BaseMaterial3D) -> String:
 			culling_mode = "None"
 	
 	if material.albedo_texture != null:
-		albedo_texture = normalize_resource_path(material.albedo_texture.resource_path)
+		albedo_texture = match_assets_path(normalize_resource_path(material.albedo_texture.resource_path))
 	
 	var material_data = {
 		"shader": "1ca9a72c-161e-44db-ad76-bf0ae432f78b",
@@ -250,7 +253,7 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 			var mesh_name = null
 			
 			if mesh_instance.mesh != null:
-				mesh_name = normalize_resource_path(mesh_instance.mesh.resource_path)
+				mesh_name = match_assets_path(normalize_resource_path(mesh_instance.mesh.resource_path))
 				surface_count = mesh_instance.mesh.get_surface_count()
 			
 			if surface_count > 0:
@@ -267,7 +270,7 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 					else:
 						var material_path = export_material(material)
 						
-						materials.append(normalize_material_extension(material_path))
+						materials.append(match_assets_path(material_path))
 			
 			component_data = {
 
