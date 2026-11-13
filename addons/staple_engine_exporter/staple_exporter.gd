@@ -156,10 +156,15 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 	if node is Node3D:
 		var n: Node3D = node
 		visible = n.is_visible()
+		
 		var transform = n.transform
+		
 		position = left_handed_position(n.position)
 		rotation = left_handed_rotation_angles(n.rotation_degrees)
 		scale = n.scale
+		
+		if node is MeshInstance3D:
+			scale.z *= -1
 	
 	var entity_data = {
 		"kind": "Entity",
