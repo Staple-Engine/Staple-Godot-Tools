@@ -16,6 +16,7 @@ func export() -> void:
 	var save_dialog = EditorFileDialog.new()
 
 	save_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	save_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	save_dialog.title = "Select folder to store exported files"
 	
 	save_dialog.dir_selected.connect(export_selected)
@@ -331,11 +332,10 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 			
 			component_data = {
 				"motionType": "Static",
-				"freezeRotationX": static_body.axis_lock_angular_x or static_body.lock_rotation,
-				"freezeRotationY": static_body.axis_lock_angular_y or static_body.lock_rotation,
-				"freezeRotationZ": static_body.axis_lock_angular_z or static_body.lock_rotation,
+				"freezeRotationX": static_body.axis_lock_angular_x,
+				"freezeRotationY": static_body.axis_lock_angular_y,
+				"freezeRotationZ": static_body.axis_lock_angular_z,
 				"is2DPlane": static_body.axis_lock_linear_z,
-				"mass": static_body.mass,
 			}
 		"SpotLight3D":
 			var light: SpotLight3D = node
@@ -463,7 +463,7 @@ func export_selected(path: String) -> void:
 	var valid_files = PackedStringArray()
 	
 	for file in selected_files:
-		if file.ends_with(".tscn"):
+		if file.ends_with(".tscn") or file.ends_with(".tres"):
 			valid_files.append(file)
 			
 	if valid_files.size() == 0:
@@ -478,42 +478,50 @@ func export_selected(path: String) -> void:
 	
 	if exported_materials == null:
 		exported_materials = PackedStringArray()
+	
+	exported_materials.clear()
 		
 	var failures = PackedStringArray()
 	
 	for file in valid_files:
 		var resource: Resource = ResourceLoader.load(file)
 		
-		if not (resource is PackedScene):
+		if resource is PackedScene:
+
+			var scene: PackedScene = resource
+			var instance: Node = scene.instantiate()
 			
-			failures.append(file)
+			var scene_data: Array = []
+			var node_relationships = {}
 			
-			return
-		
-		var scene: PackedScene = resource
-		var instance: Node = scene.instantiate()
-		
-		var scene_data: Array = []
-		var node_relationships = {}
-		
-		entity_counter = 0
-		
-		add_node(instance, scene_data, node_relationships)
-		
-		instance.queue_free()
-		
-		var data = JSON.stringify(scene_data, "\t", false)
-		
-		var out_file_name = path.path_join(file.get_file().replace(".tscn", ".scene"))
-		
-		var out_file = FileAccess.open(out_file_name, FileAccess.WRITE)
-		
-		if out_file:
-			out_file.store_string(data)
-			out_file.close()
+			entity_counter = 0
 			
-			print("Saved %s!" % [out_file_name])
+			add_node(instance, scene_data, node_relationships)
+			
+			instance.queue_free()
+			
+			var data = JSON.stringify(scene_data, "\t", false)
+			
+			var out_file_name = path.path_join(file.get_file().replace(".tscn", ".scene"))
+			
+			var out_file = FileAccess.open(out_file_name, FileAccess.WRITE)
+			
+			if out_file:
+				out_file.store_string(data)
+				out_file.close()
+				
+				print("Saved %s!" % [out_file_name])
+			else:
+				failures.append(file)
+
+		elif resource is StandardMaterial3D:
+			
+			var material: StandardMaterial3D = resource
+			
+			export_material(material)
+
 		else:
+			
 			failures.append(file)
 		
 	for failure in failures:
