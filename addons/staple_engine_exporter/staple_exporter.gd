@@ -71,7 +71,7 @@ func match_assets_path(path: String) -> String:
 func encode_color(color: Color) -> String:
 	return "#%s" % [color.to_html().to_upper()]
 
-func export_material(material: BaseMaterial3D) -> String:
+func export_material(material: BaseMaterial3D, base_path: String) -> String:
 	var material_name = normalize_material_extension(material.resource_path)
 
 	if exported_materials.find(material_name) >= 0:
@@ -96,10 +96,10 @@ func export_material(material: BaseMaterial3D) -> String:
 			"diffuseColor": {
 				"type": "Color",
 				"colorValue": {
-					"r": clamp(material.albedo_color.r * 255, 0, 255),
-					"g": clamp(material.albedo_color.g * 255, 0, 255),
-					"b": clamp(material.albedo_color.b * 255, 0, 255),
-					"a": clamp(material.albedo_color.a * 255, 0, 255),
+					"r": int(clamp(material.albedo_color.r * 255, 0, 255)),
+					"g": int(clamp(material.albedo_color.g * 255, 0, 255)),
+					"b": int(clamp(material.albedo_color.b * 255, 0, 255)),
+					"a": int(clamp(material.albedo_color.a * 255, 0, 255)),
 				}
 			},
 			"diffuseTexture": {
@@ -115,7 +115,12 @@ func export_material(material: BaseMaterial3D) -> String:
 	
 	var data = JSON.stringify(material_data, "\t", false)
 	
-	var out_file = FileAccess.open(material_name, FileAccess.WRITE)
+	var combined = base_path.path_join(material_name)
+	var base_directory = combined.get_base_dir()
+	
+	DirAccess.make_dir_absolute(base_directory)
+	
+	var out_file = FileAccess.open(combined, FileAccess.WRITE)
 	
 	if out_file:
 		out_file.store_string(data)
@@ -133,7 +138,8 @@ func left_handed_position(position: Vector3) -> Vector3:
 func left_handed_rotation_angles(rotation: Vector3)-> Vector3:
 	return Vector3(-rotation.x, -rotation.y, rotation.z)
 
-func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
+func add_node(node: Node, scene_data: Array, node_relationships: Dictionary,
+	base_path: String):
 	
 	var parent_id = 0
 	
@@ -142,17 +148,25 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 		
 	entity_counter += 1
 	
-	var position = Vector3()
-	var rotation = Vector3()
-	var scale = Vector3()
 	var visible = true
+	var x = 0
+	var y = 0
+	var z = 0
+	var rotationX = 0
+	var rotationY = 0
+	var rotationZ = 0
+	var scaleX = 1
+	var scaleY = 1
+	var scaleZ = 1
 	
 	if node is Node2D:
 		var n: Node2D = node
 		visible = n.is_visible()
-		position = n.position
-		rotation = n.rotation_degrees
-		scale = n.scale
+		x = n.position.x
+		y = n.position.y
+		rotationZ = n.rotation_degrees
+		scaleX = n.scale.x
+		scaleY = n.scale.y
 
 	if node is Node3D:
 		var n: Node3D = node
@@ -160,12 +174,24 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 		
 		var transform = n.transform
 		
-		position = left_handed_position(n.position)
-		rotation = left_handed_rotation_angles(n.rotation_degrees)
-		scale = n.scale
+		var position = left_handed_position(n.position)
+
+		x = position.x
+		y = position.y
+		z = position.z
+		
+		var rotation = left_handed_rotation_angles(n.rotation_degrees)
+
+		rotationX = rotation.x
+		rotationY = rotation.y
+		rotationZ = rotation.z
+		
+		scaleX = n.scale.x
+		scaleY = n.scale.y
+		scaleZ = n.scale.z
 		
 		if node is MeshInstance3D:
-			scale.z *= -1
+			scaleZ *= -1
 	
 	var entity_data = {
 		"kind": "Entity",
@@ -174,19 +200,19 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 		"parent": parent_id,
 		"transform": {
 			"position": {
-				"x": position.x,
-				"y": position.y,
-				"z": position.z,
+				"x": x,
+				"y": y,
+				"z": z,
 			},
 			"rotation": {
-				"x": rotation.x,
-				"y": rotation.y,
-				"z": rotation.z,
+				"x": rotationX,
+				"y": rotationY,
+				"z": rotationZ,
 			},
 			"scale": {
-				"x": scale.x,
-				"y": scale.y,
-				"z": scale.z,
+				"x": scaleX,
+				"y": scaleY,
+				"z": scaleZ,
 			}
 		},
 		"layer": "Default",
@@ -275,13 +301,17 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 					
 					if surface_arrays.size() >= ArrayMesh.ARRAY_BONES and surface_arrays[ArrayMesh.ARRAY_BONES] != null:
 						component_type = "Staple.SkinnedMeshRenderer"
+						
+					var localMaterial = mesh_instance.mesh.surface_get_material(i)
+					var material: BaseMaterial3D = null
 					
-					var material: BaseMaterial3D = mesh_instance.mesh.surface_get_material(i)
+					if localMaterial is BaseMaterial3D:
+						material = mesh_instance.mesh.surface_get_material(i)
 					
 					if material == null:
 						materials.append("")
 					else:
-						var material_path = export_material(material)
+						var material_path = export_material(material, base_path)
 						
 						materials.append(match_assets_path(material_path))
 			
@@ -455,7 +485,7 @@ func add_node(node: Node, scene_data: Array, node_relationships: Dictionary):
 	scene_data.append(entity_data)
 	
 	for child in node.get_children():
-		add_node(child, scene_data, node_relationships)
+		add_node(child, scene_data, node_relationships, base_path)
 
 func export_selected(path: String) -> void:
 	var selected_files = EditorInterface.get_selected_paths()
@@ -491,12 +521,17 @@ func export_selected(path: String) -> void:
 			var scene: PackedScene = resource
 			var instance: Node = scene.instantiate()
 			
+			if instance == null:
+				failures.append(file)
+
+				continue
+			
 			var scene_data: Array = []
 			var node_relationships = {}
 			
 			entity_counter = 0
 			
-			add_node(instance, scene_data, node_relationships)
+			add_node(instance, scene_data, node_relationships, path)
 			
 			instance.queue_free()
 			
@@ -518,7 +553,7 @@ func export_selected(path: String) -> void:
 			
 			var material: StandardMaterial3D = resource
 			
-			export_material(material)
+			export_material(material, path)
 
 		else:
 			
